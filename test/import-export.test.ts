@@ -1,22 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { importApp } from "../src/import.js";
-import { exportApp } from "../src/export.js";
+import { importApps } from "../src/import.js";
+import { exportApps } from "../src/export.js";
 import { decode } from "../src/transit.js";
 import { stringifyJson, type JsonObject } from "../src/json.js";
 import { sampleExport } from "./fixture.js";
 
-const EXPORT_NAME = "My%20App.json";
+const APP = "My%20App";
+const EXPORT_NAME = `${APP}.json`;
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "unretool-"));
   mkdirSync(join(root, "export"));
   const original = JSON.stringify(sampleExport());
   writeFileSync(join(root, "export", EXPORT_NAME), original);
-  return { root, original, src: join(root, "source"), plugins: join(root, "source", "plugins") };
+  return { root, original, src: join(root, "source", APP), plugins: join(root, "source", APP, "plugins") };
 }
 
 const read = (...p: string[]) => readFileSync(join(...p), "utf8");
@@ -24,7 +25,10 @@ const readJson = (...p: string[]) => JSON.parse(read(...p));
 
 test("import writes the source/ layout", () => {
   const { root, src, plugins } = setup();
-  const r = importApp(undefined, { root });
+  const [r, ...rest] = importApps([], { root });
+  assert.equal(rest.length, 0);
+  assert.equal(r.name, APP);
+  assert.equal(r.sourceDir, src);
   assert.equal(r.plugins, 6);
   assert.equal(r.exportFile, join(root, "export", EXPORT_NAME));
 
@@ -55,8 +59,8 @@ test("import writes the source/ layout", () => {
 
 test("export reproduces the original file exactly", () => {
   const { root, original } = setup();
-  importApp(undefined, { root });
-  const r = exportApp({ root });
+  importApps([], { root });
+  const [r] = exportApps([], { root });
   assert.equal(r.output, join(root, "export", EXPORT_NAME));
   assert.equal(r.plugins, 6);
   assert.equal(read(r.output), original);
@@ -64,24 +68,24 @@ test("export reproduces the original file exactly", () => {
 
 test("import replaces source/plugins/ and keeps other files in source/", () => {
   const { root, src, plugins } = setup();
-  importApp(undefined, { root });
+  importApps([], { root });
   writeFileSync(join(plugins, "stale.json"), "{}");
   writeFileSync(join(src, "NOTES.md"), "mine");
-  importApp(undefined, { root });
+  importApps([], { root });
   assert.ok(!existsSync(join(plugins, "stale.json")));
   assert.equal(read(src, "NOTES.md"), "mine");
 });
 
 test("export picks up edited code files and appends unlisted plugins", () => {
   const { root, plugins } = setup();
-  importApp(undefined, { root });
+  importApps([], { root });
   writeFileSync(join(plugins, "getUsers.query.sql"), "select 1");
   const copy = read(plugins, "format.json").replace('"id": "format"', '"id": "format2"');
   writeFileSync(join(plugins, "format2.json"), copy);
 
   const warnings: string[] = [];
   const out = join(root, "out", "new.json");
-  exportApp({ root, output: out, warn: (m) => warnings.push(m) });
+  exportApps([APP], { root, output: out, warn: (m) => warnings.push(m) });
   assert.deepEqual(warnings, ["format2.json is not in $pluginOrder; appending it"]);
 
   const app = decode(readJson(out).page.data.appState) as JsonObject;
@@ -92,18 +96,47 @@ test("export picks up edited code files and appends unlisted plugins", () => {
 
 test("export rejects missing plugins and mismatched ids", () => {
   const { root, plugins } = setup();
-  importApp(undefined, { root });
+  importApps([], { root });
   renameSync(join(plugins, "format.json"), join(plugins, "formatX.json"));
-  assert.throws(() => exportApp({ root }), /missing from source\/plugins\/: format$/);
+  assert.throws(() => exportApps([], { root }), /missing from source\/My%20App\/plugins\/: format$/);
   renameSync(join(plugins, "formatX.json"), join(plugins, "format.json"));
 
   writeFileSync(join(plugins, "format.json"), read(plugins, "format.json").replace('"id": "format"', '"id": "other"'));
-  assert.throws(() => exportApp({ root }), /format\.json has id "other"; the file name must match the id/);
+  assert.throws(() => exportApps([], { root }), /format\.json has id "other"; the file name must match the id/);
 });
 
-test("import needs exactly one export unless one is given", () => {
-  const { root } = setup();
-  writeFileSync(join(root, "export", "second.json"), "{}");
-  assert.throws(() => importApp(undefined, { root }), /Expected exactly one \.json in .*export, found 2/);
-  assert.equal(importApp(join(root, "export", EXPORT_NAME), { root }).plugins, 6);
+test("each export gets its own source folder and exports back to its own file", () => {
+  const { root, original } = setup();
+  writeFileSync(join(root, "export", "copy.json"), original);
+  const imported = importApps([], { root });
+  assert.deepEqual(imported.map((r) => r.name), [APP, "copy"]);
+  assert.deepEqual(readJson(root, "source", "copy", "manifest.json"), { exportFile: "copy.json" });
+
+  writeFileSync(join(root, "source", "copy", "plugins", "getUsers.query.sql"), "select 1");
+  rmSync(join(root, "export", "copy.json"));
+  const exported = exportApps([], { root });
+  assert.deepEqual(exported.map((r) => r.output), [join(root, "export", EXPORT_NAME), join(root, "export", "copy.json")]);
+  assert.equal(read(root, "export", EXPORT_NAME), original);
+  assert.match(read(root, "export", "copy.json"), /select 1/);
+
+  assert.throws(() => exportApps([], { root, output: join(root, "x.json") }), /--output needs a single app, but there are 2/);
+});
+
+test("import and export take app names", () => {
+  const { root, original } = setup();
+  writeFileSync(join(root, "export", "copy.json"), original);
+  assert.deepEqual(importApps(["copy"], { root }).map((r) => r.name), ["copy"]);
+  assert.ok(!existsSync(join(root, "source", APP)));
+  assert.deepEqual(importApps([join(root, "export", EXPORT_NAME)], { root }).map((r) => r.name), [APP]);
+  assert.deepEqual(exportApps(["copy"], { root }).map((r) => r.name), ["copy"]);
+  assert.throws(() => importApps(["nope"], { root }), /No export file nope/);
+});
+
+test("import and export explain an empty or old-style project", () => {
+  const root = mkdtempSync(join(tmpdir(), "unretool-"));
+  assert.throws(() => importApps([], { root }), /No \.json files in /);
+  assert.throws(() => exportApps([], { root }), /No imported apps in .*run unretool import first/);
+  mkdirSync(join(root, "source"));
+  writeFileSync(join(root, "source", "manifest.json"), "{}");
+  assert.throws(() => exportApps([], { root }), /old single-app layout/);
 });

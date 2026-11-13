@@ -1,42 +1,29 @@
 /**
- * import: split a Retool app export (export/*.json) into files under source/.
- * source/plugins/ is regenerated from scratch; other files in source/ that this
- * command does not manage are left alone.
+ * import: split Retool app exports (export/<name>.json) into files under
+ * source/<name>/. source/<name>/plugins/ is regenerated from scratch; other files
+ * in source/<name>/ that this command does not manage are left alone.
  */
-import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { isObject, type Json } from "./json.js";
 import {
-  APP_STATE_MARKER, FILE_REF_KEY, PLUGIN_ORDER_KEY, fieldExtension, getPath, getTemplate, pluginFileStem, projectPaths,
-  readJson, recordValue, shouldExtract, writeJson, writeText, type Paths,
+  APP_STATE_MARKER, FILE_REF_KEY, PLUGIN_ORDER_KEY, appName, fieldExtension, getPath, getTemplate, legacyLayoutNote,
+  listExportFiles, pluginFileStem, projectPaths, readJson, recordValue, resolveExportFile, shouldExtract, writeJson,
+  writeText, type Paths,
 } from "./layout.js";
 import { decode, encode } from "./transit.js";
 
 export interface ImportOptions {
   /** Project directory holding export/ and source/ (default: the current directory). */
   root?: string;
+  warn?: (message: string) => void;
 }
 
 export interface ImportResult {
+  name: string;
   exportFile: string;
   sourceDir: string;
   plugins: number;
-}
-
-export function findExportFile(paths: Paths): string {
-  const isJson = process.platform === "win32" ? /\.json$/i : /\.json$/;
-  let files: string[] = [];
-  try {
-    files = readdirSync(paths.exportDir)
-      .filter((f) => !f.startsWith(".") && isJson.test(f) && statSync(join(paths.exportDir, f)).isFile())
-      .sort();
-  } catch {
-    // A missing export/ is reported as finding no files.
-  }
-  if (files.length !== 1) {
-    throw new Error(`Expected exactly one .json in ${paths.exportDir}, found ${files.length}; pass the file explicitly.`);
-  }
-  return join(paths.exportDir, files[0]);
 }
 
 /** Writes one plugin to source/plugins/, extracting code fields. */
@@ -56,9 +43,30 @@ function splitPlugin(paths: Paths, pluginId: string, plugin: Json) {
   writeJson(join(paths.pluginsDir, `${stem}.json`), plugin);
 }
 
-export function importApp(exportFile?: string, options: ImportOptions = {}): ImportResult {
-  const paths = projectPaths(options.root);
-  const file = resolve(exportFile ?? findExportFile(paths));
+/**
+ * Imports each export given (paths, or app names meaning export/<name>.json), or
+ * every *.json in export/ when none are given.
+ */
+export function importApps(exportFiles: string[], options: ImportOptions = {}): ImportResult[] {
+  const note = legacyLayoutNote(options.root);
+  if (note) options.warn?.(note);
+  const files = exportFiles.length
+    ? exportFiles.map((f) => resolveExportFile(options.root, f))
+    : listExportFiles(options.root);
+  if (!files.length) throw new Error(`No .json files in ${join(resolve(options.root ?? "."), "export")}`);
+  const names = new Map<string, string>();
+  for (const f of files) {
+    const other = names.get(appName(f));
+    if (other !== undefined && other !== f) throw new Error(`${other} and ${f} would both import to source/${appName(f)}/`);
+    names.set(appName(f), f);
+  }
+  return [...names.values()].map((f) => importApp(f, options));
+}
+
+/** Imports one export file into source/<name>/, where name is the file name without .json. */
+export function importApp(exportFile: string, options: ImportOptions = {}): ImportResult {
+  const file = resolve(exportFile);
+  const paths = projectPaths(options.root, appName(file));
   const wrapper = readJson(file);
   const appStateStr = getPath(wrapper, ["page", "data", "appState"], file);
   if (typeof appStateStr !== "string") throw new Error(`${file}: page.data.appState is not a string`);
@@ -90,5 +98,5 @@ export function importApp(exportFile?: string, options: ImportOptions = {}): Imp
 
   writeJson(paths.manifestFile, new Map([["exportFile", basename(file)]]));
 
-  return { exportFile: file, sourceDir: paths.sourceDir, plugins: plugins.size };
+  return { name: paths.name, exportFile: file, sourceDir: paths.sourceDir, plugins: plugins.size };
 }

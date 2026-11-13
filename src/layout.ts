@@ -1,10 +1,11 @@
 /**
- * Shared paths and layout rules for the export/ <-> source/ conversion. Matches
- * PdoxLetters' scripts/common.py, so either tool can read the other's files.
+ * Shared paths and layout rules for the export/ <-> source/ conversion. Derived from
+ * PdoxLetters' scripts/common.py, with one source folder per app instead of a
+ * single source/.
  *
  * <project>/
- *   export/<name>.json     the Retool app export (as downloaded from Retool)
- *   source/
+ *   export/<name>.json     the Retool app export (as downloaded from Retool); any number
+ *   source/<name>/         one folder per export, named after the export file
  *     manifest.json        name of the export file this source maps to
  *     export.json          export wrapper (uuid, page metadata, changes record);
  *                          page.data.appState is replaced by APP_STATE_MARKER
@@ -16,12 +17,14 @@
  *                          pulled out of the plugin template; the JSON holds
  *                          {"$file": "<id>.<field>.<ext>"} in their place
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isObject, parseJson, stringifyJson, type Json, type JsonObject } from "./json.js";
 
 export interface Paths {
   root: string;
+  /** App name: the export file name without .json, and the folder under source/. */
+  name: string;
   exportDir: string;
   sourceDir: string;
   pluginsDir: string;
@@ -30,11 +33,18 @@ export interface Paths {
   appFile: string;
 }
 
-export function projectPaths(root = "."): Paths {
-  root = resolve(root);
-  const sourceDir = join(root, "source");
+const JSON_EXT = process.platform === "win32" ? /\.json$/i : /\.json$/;
+
+/** The app name for an export file: its file name without .json. */
+export const appName = (exportFile: string) => basename(exportFile).replace(JSON_EXT, "");
+
+export function projectPaths(root: string | undefined, name: string): Paths {
+  root = resolve(root ?? ".");
+  if (!name || name === "." || name === ".." || /[\\/]/.test(name)) throw new Error(`Invalid app name ${JSON.stringify(name)}`);
+  const sourceDir = join(root, "source", name);
   return {
     root,
+    name,
     exportDir: join(root, "export"),
     sourceDir,
     pluginsDir: join(sourceDir, "plugins"),
@@ -42,6 +52,46 @@ export function projectPaths(root = "."): Paths {
     wrapperFile: join(sourceDir, "export.json"),
     appFile: join(sourceDir, "app.json"),
   };
+}
+
+const isFile = (p: string) => existsSync(p) && statSync(p).isFile();
+const listDir = (dir: string) => {
+  try {
+    return readdirSync(dir).filter((f) => !f.startsWith(".")).sort();
+  } catch {
+    return []; // A missing directory has nothing in it.
+  }
+};
+
+/** The *.json files in <root>/export/. */
+export function listExportFiles(root?: string): string[] {
+  const dir = join(resolve(root ?? "."), "export");
+  return listDir(dir).filter((f) => JSON_EXT.test(f)).map((f) => join(dir, f)).filter(isFile);
+}
+
+/** Names of the imported apps: folders in <root>/source/ holding a manifest.json. */
+export function listApps(root?: string): string[] {
+  const dir = join(resolve(root ?? "."), "source");
+  return listDir(dir).filter((f) => isFile(join(dir, f, "manifest.json")));
+}
+
+/** A note about a source/ from before per-app folders, if there is one. */
+export function legacyLayoutNote(root?: string): string | undefined {
+  const old = join(resolve(root ?? "."), "source", "manifest.json");
+  if (!isFile(old)) return undefined;
+  return `${old} is from the old single-app layout, which is no longer read; delete source/manifest.json, ` +
+    "app.json, export.json and plugins/ and re-run unretool import";
+}
+
+/**
+ * Finds an export from a command line argument: a path to a file, or an app name
+ * meaning export/<name>.json.
+ */
+export function resolveExportFile(root: string | undefined, arg: string): string {
+  if (isFile(arg)) return resolve(arg);
+  const named = join(resolve(root ?? "."), "export", JSON_EXT.test(arg) ? arg : `${arg}.json`);
+  if (isFile(named)) return named;
+  throw new Error(`No export file ${arg} (looked for ${resolve(arg)} and ${named})`);
 }
 
 export const APP_STATE_MARKER = "$appState: see app.json";
