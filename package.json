@@ -1,0 +1,42 @@
+{
+  "name": "unretool",
+  "version": "1.0.0",
+  "description": "A command line tool that imports Retool classic app exports into source files and exports them back.",
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/bin.ts",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
+    "test": "node --import tsx --test test/cli.test.ts test/transit.test.ts test/import-export.test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/larrycostigan5FDC/unretool.git"
+  },
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/larrycostigan5FDC/unretool/issues"
+  },
+  "homepage": "https://github.com/larrycostigan5FDC/unretool#readme",
+  "type": "module",
+  "bin": {
+    "unretool": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.130",
+    "transit-js": "^0.8.874",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
