@@ -1,14 +1,14 @@
 {
   "name": "unretool",
   "version": "1.0.0",
-  "description": "A command line tool that splits and compiles Retool classic apps from their exported JSON file.",
+  "description": "A command line tool that imports Retool classic app exports into source files and exports them back.",
   "main": "dist/cli.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/bin.ts",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
-    "test": "node --import tsx --test test/cli.test.ts test/transit.test.ts test/split-compile.test.ts"
+    "test": "node --import tsx --test test/cli.test.ts test/transit.test.ts test/import-export.test.ts"
   },
   "repository": {
     "type": "git",

@@ -1,42 +1,57 @@
 # unretool
-A command line tool that splits and compiles Retool classic apps from their exported JSON file.
+A command line tool that imports Retool classic app exports into source files you can
+edit and review, and exports them back into a file Retool can import.
+
+It replaces the Python `scripts/import_app.py` / `scripts/export_app.py` used in
+PdoxLetters: the commands, folders and files are the same, and both tools produce
+byte-identical output, so they can be used on the same project.
 
 ## Usage
 
-```
-unretool split <app.json> [-o <dir>] [--force]
-unretool compile <dir> [-o <file.json>] [--force]
-```
-
-`split` writes `<app.json>` without its extension (e.g. `My App.json` -> `My App/`).
-`compile` writes `<dir>.json`. Neither overwrites existing output without `--force`,
-and `split --force` only replaces a directory that `split` created.
-
-Files follow the types in [`src/retool-classic-export.ts`](src/retool-classic-export.ts).
-Both commands check their input and output against them.
-
-## Split layout
+Run from the project directory (the one holding `export/` and `source/`), or pass
+`-C <dir>`:
 
 ```
-My App/
-  export.json          the export (RetoolAppExport); appState strings point to the app dirs
-  app.json             appTemplate settings; plugins maps each id to its file
-  app.js, app.css      preloadedAppJavaScript and appStyles
-  plugins/<id>.json    one file per component, query, state variable, ...
-  plugins/<id>.sql     query text (.sql, .js or .graphql, by plugin subtype)
-  transit.json         Transit types that plain JSON can't hold (generated; don't edit)
-  modules/<uuid>/      the same layout for each module
+unretool import [EXPORT_JSON]   # export/*.json -> source/
+unretool export [-o OUTPUT]     # source/ -> export/<exportFile from source/manifest.json>
 ```
 
-Values that `split` moved into files are written as `"unretool:file:<path>"`.
+`import` uses the only `*.json` in `export/` when `EXPORT_JSON` is omitted. It
+regenerates `source/plugins/` from scratch and leaves other files in `source/` alone.
+It refuses to import an app whose `appState` wouldn't export back identically.
 
-`page.data.appState` is a Transit-encoded Immutable.js structure. `split` decodes it,
-and `compile` re-encodes it with the same tags and Transit write caching as
-transit-js, so an unchanged split compiles back to a byte-identical file.
+`export` writes plugins in the order of `$pluginOrder` in `source/app.json`. Plugin
+files that aren't listed there are appended (with a warning), so to add a plugin you
+can copy a similar `plugins/<id>.json` and change its `id`. Each file's name must
+match the plugin's `id`.
 
-To add a plugin, add `plugins/<id>.json` (copying a similar plugin is easiest).
-`compile` picks up plugin files that `app.json` doesn't list and takes their Transit
-types from a plugin with the same subtype.
+## Layout
+
+```
+export/<name>.json         the Retool app export (as downloaded from Retool)
+source/
+  manifest.json            name of the export file this source maps to
+  export.json              export wrapper (uuid, page metadata, changes record);
+                           page.data.appState is "$appState: see app.json"
+  app.json                 decoded appState (app settings); the plugins map is
+                           replaced by {"$pluginOrder": [ids...]}
+  plugins/<id>.json        one decoded plugin (component, query, state, ...)
+  plugins/<id>.<field>.<ext>  (or <id>.<ext> when field == ext, e.g. html4.css)
+                           code fields (SQL, JS, CSS, HTML, multi-line text) pulled
+                           out of the plugin template; the JSON holds
+                           {"$file": "<id>.<field>.<ext>"} in their place
+```
+
+The template fields `query`, `transformer`, `css`, `html`, `javascript`, `funcBody`
+and `script` are always extracted when non-empty, as is any other multi-line string.
+Queries get `.sql` for SQL subtypes, `.js` for `JavascriptQuery`/`Function`, and
+`.txt` otherwise.
+
+`page.data.appState` is Transit JSON. The decoded files keep its tags inline:
+`{"~#iR": {"n": ..., "v": ...}}` for Immutable Records, `{"~#iM": {...}}` and
+`{"~#iOM": {...}}` for Immutable Maps, `{"~#iL": [...]}` for Lists, and strings such
+as `"~m1759583917404"` (dates) as-is. `export` re-applies the Transit write cache as
+transit-js does.
 
 ## Development
 

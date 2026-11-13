@@ -1,43 +1,38 @@
 import { createRequire } from "node:module";
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative } from "node:path";
 import { Command } from "commander";
-import { splitExport } from "./split.js";
-import { compileDir } from "./compile.js";
+import { importApp } from "./import.js";
+import { exportApp } from "./export.js";
 
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-const shown = (p: string) => {
-  const rel = relative(process.cwd(), p);
-  return rel === "" ? "." : rel.startsWith("..") || isAbsolute(rel) ? resolve(p) : rel;
-};
+const shown = (p: string) => relative(process.cwd(), p) || ".";
+const ROOT_HELP = "project directory holding export/ and source/";
 
 export function createProgram(): Command {
   const program = new Command()
     .name("unretool")
-    .description("Split and compile Retool classic apps from their exported JSON file.")
+    .description("Import Retool classic app exports into source files, and export them back.")
     .version(version);
 
   program
-    .command("split")
-    .description("Split an exported Retool app JSON file into a directory of source files")
-    .argument("<app.json>", "exported Retool app JSON file")
-    .option("-o, --out <dir>", "output directory (default: the JSON file's path without its extension)")
-    .option("-f, --force", "replace the output directory if it holds an earlier split")
-    .action((input: string, opts: { out?: string; force?: boolean }) => {
-      const r = splitExport(input, opts);
-      console.log(`Split ${shown(input)} into ${shown(r.out)} (${plural(r.plugins, "plugin")}, ${plural(r.modules, "module")})`);
+    .command("import")
+    .description("Split a Retool app export (export/*.json) into files under source/")
+    .argument("[export_file]", "Retool export JSON (default: the only *.json in export/)")
+    .option("-C, --root <dir>", ROOT_HELP, ".")
+    .action((exportFile: string | undefined, opts: { root: string }) => {
+      const r = importApp(exportFile, { root: opts.root });
+      console.log(`Imported ${shown(r.exportFile)} -> ${shown(r.sourceDir)} (${r.plugins} plugins)`);
     });
 
   program
-    .command("compile")
-    .description("Compile a split directory back into a Retool app JSON file")
-    .argument("<dir>", "directory created by `unretool split`")
-    .option("-o, --out <file>", "output JSON file (default: <dir>.json)")
-    .option("-f, --force", "overwrite the output file if it exists")
-    .action((dir: string, opts: { out?: string; force?: boolean }) => {
-      const r = compileDir(dir, { ...opts, warn: (m) => console.error(`warning: ${m}`) });
-      console.log(`Compiled ${shown(dir)} into ${shown(r.out)} (${plural(r.plugins, "plugin")}, ${plural(r.modules, "module")})`);
+    .command("export")
+    .description("Rebuild the Retool app export JSON in export/ from files in source/")
+    .option("-o, --output <file>", "output path (default: export/<exportFile from manifest>)")
+    .option("-C, --root <dir>", ROOT_HELP, ".")
+    .action((opts: { output?: string; root: string }) => {
+      const r = exportApp({ ...opts, warn: (m) => console.error(`warning: ${m}`) });
+      console.log(`Exported ${shown(r.sourceDir)} -> ${shown(r.output)} (${r.plugins} plugins)`);
     });
 
   return program;
