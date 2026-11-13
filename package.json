@@ -2,9 +2,13 @@
   "name": "unretool",
   "version": "1.0.0",
   "description": "A command line tool that splits and compiles Retool classic apps from their exported JSON file.",
-  "main": "index.js",
+  "main": "dist/cli.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/bin.ts",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
+    "test": "node --import tsx --test test/cli.test.ts"
   },
   "repository": {
     "type": "git",
@@ -15,5 +19,23 @@
   "bugs": {
     "url": "https://github.com/larrycostigan5FDC/unretool/issues"
   },
-  "homepage": "https://github.com/larrycostigan5FDC/unretool#readme"
+  "homepage": "https://github.com/larrycostigan5FDC/unretool#readme",
+  "type": "module",
+  "bin": {
+    "unretool": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.130",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
 }
