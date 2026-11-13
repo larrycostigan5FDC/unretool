@@ -8,7 +8,7 @@
     "dev": "tsx src/bin.ts",
     "typecheck": "tsc --noEmit",
     "prepare": "npm run build",
-    "test": "node --import tsx --test test/cli.test.ts test/transit.test.ts test/import-export.test.ts"
+    "test": "node --import tsx --test test/cli.test.ts test/transit.test.ts test/import-export.test.ts test/diff.test.ts"
   },
   "repository": {
     "type": "git",
